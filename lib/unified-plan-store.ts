@@ -10,11 +10,14 @@ import { generatePlan } from './plan-generator';
 import { generatePlanFrom } from './plan-generator-from';
 import {
   ReviewRating,
+  PageRatingState,
   calculateNextRatingState,
   selectSrsQueue,
   SrsQueueResult,
   DEFAULT_DAILY_SRS_LIMIT,
 } from './srs-engine';
+
+export type { PageRatingState };
 import { createHafs, Page, Surah } from 'quran-meta';
 import { PlanDay, StudyDay, FridayDay } from './six-month-plan-types';
 import { JUZ_META_RANGES } from './plan-ui-helpers';
@@ -52,20 +55,6 @@ export interface DaySnapshot {
   completedAt: string;
   pagesCount: number;
   memorizedPagesSnapshot: number[];
-}
-
-export interface PageRatingState {
-  page: number;
-  lastReviewedDate?: string;
-  lastRating?: 'excellent' | 'very_good' | 'good' | 'needs_work';
-  stage?: number;
-  strength?: number;
-  nextDueDate?: string;
-  history?: Array<{
-    date: string;
-    rating: string;
-    strength: number;
-  }>;
 }
 
 export interface DayStepsState {
