@@ -1,0 +1,18 @@
+python -c "import sys, json; sys.stdout.reconfigure(encoding='utf-8');
+path = 'C:/Users/abdel/.gemini/antigravity/brain/6c3f773d-0733-4ab2-99d3-265ad814b448/.system_generated/logs/transcript_full.jsonl'
+with open(path, encoding='utf-8') as f:
+    for i, line in enumerate(f):
+        if 'six-month-schedule.tsx' in line and 'DayPlanCard' in line:
+            data = json.loads(line)
+            tool_calls = data.get('tool_calls', [])
+            for tc in tool_calls:
+                args = tc.get('args', {})
+                if 'six-month-schedule.tsx' in str(args):
+                    print('Found in tool call args!')
+                    for k, v in args.items():
+                        if isinstance(v, str) and 'DayPlanCard' in v:
+                            print(k, len(v))
+                            with open('c:/Users/abdel/Desktop/v0-quran-memorization-website/components/plan/six-month-schedule.tsx.bak', 'w', encoding='utf-8') as out:
+                                out.write(v)
+                            print('Saved!')
+"

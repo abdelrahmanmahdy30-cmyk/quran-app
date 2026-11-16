@@ -1,0 +1,50 @@
+{
+  "name": "حافظ | برنامج حفظ القرآن الكريم",
+  "short_name": "حافظ",
+  "description": "برنامج متكامل وذكي لحفظ ومراجعة القرآن الكريم في 4 أشهر مع تتبع الإنجاز",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0a0c10",
+  "theme_color": "#12141a",
+  "dir": "rtl",
+  "lang": "ar",
+  "categories": ["education", "books", "productivity", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-dark-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "القرآن والمراجعة",
+      "url": "/quran",
+      "description": "فتح قائمة السور وجدول المراجعة الذكية"
+    },
+    {
+      "name": "لوحة التحكم",
+      "url": "/",
+      "description": "عرض تقدم اليوم والسلسلة"
+    },
+    {
+      "name": "الإحصائيات",
+      "url": "/stats",
+      "description": "تحليل الأداء ومخطط الحفظ"
+    }
+  ]
+}

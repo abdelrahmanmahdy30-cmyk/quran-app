@@ -1,0 +1,145 @@
+@'
+with open("c:/Users/abdel/Desktop/v0-quran-memorization-website/components/plan/six-month-schedule.tsx", "r", encoding="utf-8") as f:
+    text = f.read()
+
+# Make SixMonthScheduleProps optional
+text = text.replace("""interface SixMonthScheduleProps {
+  completedDays: Set<string>;
+  onToggleComplete: (dateStr: string) => void;
+}
+
+export function SixMonthSchedule({
+  completedDays,
+  onToggleComplete,
+}: SixMonthScheduleProps) {""", """import { usePlanProgress } from "@/lib/use-plan-progress";
+
+interface SixMonthScheduleProps {
+  completedDays?: Set<string>;
+  onToggleComplete?: (dateStr: string) => void;
+}
+
+export function SixMonthSchedule({
+  completedDays: propCompletedDays,
+  onToggleComplete: propOnToggleComplete,
+}: SixMonthScheduleProps = {}) {
+  const {
+    isDayCompleted,
+    isStepDone,
+    toggleStep,
+    toggleDay,
+    todayLocalDate,
+    completedDaysCount,
+    percentTotal,
+  } = usePlanProgress();""")
+
+# Replace the inner subTasks and handlers
+old_subtasks_block = """  // إدارة المهام الفرعية المستقلة (حفظ جديد + مراجعة)
+  const [subTasks, setSubTasks] = useState<Set<string>>(() => loadSubTasks());
+
+  const isSubTaskDone = (date: string, task: SubTaskType): boolean => {
+    if (completedDays.has(date)) return true;
+    return subTasks.has(getSubTaskKey(date, task));
+  };
+
+  const toggleSubTask = (date: string, task: SubTaskType, isFriday: boolean) => {
+    if (!canMarkDayAsCompleted(date, todayLocalDate)) return;
+
+    const nextSub = new Set(subTasks);
+    const key = getSubTaskKey(date, task);
+    const wasDone = isSubTaskDone(date, task);
+
+    if (wasDone) {
+      nextSub.delete(key);
+      if (completedDays.has(date)) {
+        onToggleComplete(date);
+        if (!isFriday) {
+          const other = task === "memorize" ? "review" : "memorize";
+          nextSub.add(getSubTaskKey(date, other));
+        }
+      }
+    } else {
+      nextSub.add(key);
+      if (isFriday) {
+        if (!completedDays.has(date)) {
+          onToggleComplete(date);
+        }
+      } else {
+        const other: SubTaskType = task === "memorize" ? "review" : "memorize";
+        const otherDone = nextSub.has(getSubTaskKey(date, other)) || completedDays.has(date);
+        if (otherDone && !completedDays.has(date)) {
+          onToggleComplete(date);
+        }
+      }
+    }
+
+    setSubTasks(nextSub);
+    saveSubTasks(nextSub);
+  };
+
+  const handleToggleDayComplete = (date: string, isFriday: boolean) => {
+    if (!canMarkDayAsCompleted(date, todayLocalDate)) return;
+    const isCompleted = completedDays.has(date);
+    const nextSub = new Set(subTasks);
+    if (isCompleted) {
+      nextSub.delete(getSubTaskKey(date, "memorize"));
+      nextSub.delete(getSubTaskKey(date, "review"));
+      nextSub.delete(getSubTaskKey(date, "near"));
+      nextSub.delete(getSubTaskKey(date, "far"));
+    } else {
+      if (isFriday) {
+        nextSub.add(getSubTaskKey(date, "review"));
+      } else {
+        nextSub.add(getSubTaskKey(date, "memorize"));
+        nextSub.add(getSubTaskKey(date, "review"));
+      }
+    }
+    setSubTasks(nextSub);
+    saveSubTasks(nextSub);
+    onToggleComplete(date);
+  };"""
+
+new_subtasks_block = """  const isSubTaskDone = (date: string, task: SubTaskType): boolean => {
+    if (task === "memorize") return isStepDone(date, "new");
+    if (task === "near") return isStepDone(date, "near");
+    if (task === "far") return isStepDone(date, "far");
+    if (task === "review") return isStepDone(date, "near") && isStepDone(date, "far");
+    return false;
+  };
+
+  const toggleSubTask = (date: string, task: SubTaskType, isFriday: boolean) => {
+    if (task === "memorize") {
+      toggleStep(date, "new");
+    } else if (task === "near") {
+      toggleStep(date, "near");
+    } else if (task === "far") {
+      toggleStep(date, "far");
+    } else if (task === "review") {
+      const nearDone = isStepDone(date, "near");
+      const farDone = isStepDone(date, "far");
+      if (nearDone && farDone) {
+        toggleStep(date, "near");
+        toggleStep(date, "far");
+      } else {
+        if (!nearDone) toggleStep(date, "near");
+        if (!farDone) toggleStep(date, "far");
+      }
+    }
+  };
+
+  const handleToggleDayComplete = (date: string) => {
+    toggleDay(date);
+  };"""
+
+text = text.replace(old_subtasks_block, new_subtasks_block)
+
+# Replace completedDays references inside six-month-schedule
+text = text.replace("completedDays.has(d.date)", "isDayCompleted(d.date)")
+text = text.replace("completedDays.has(day.date)", "isDayCompleted(day.date)")
+text = text.replace(", completedDays]", "]")
+text = text.replace("handleToggleDayComplete(day.date, day.type === \"friday\")", "handleToggleDayComplete(day.date)")
+
+with open("c:/Users/abdel/Desktop/v0-quran-memorization-website/components/plan/six-month-schedule.tsx", "w", encoding="utf-8") as f:
+    f.write(text)
+
+print("Updated components/plan/six-month-schedule.tsx successfully")
+'@ | Set-Content -Path update_sms.py -Encoding utf8; python update_sms.py; Remove-Item update_sms.py
