@@ -14,6 +14,7 @@ import { SurahDetail } from "@/components/dashboard/surah-detail";
 import { ProgressRing } from "@/components/dashboard/progress-ring";
 import { WardPanel } from "@/components/dashboard/ward-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatLocalDateStr } from "@/lib/unified-plan-store";
 
 function getLocalDisplayName(): string | null {
   if (typeof window === "undefined") return null;
@@ -38,7 +39,7 @@ function getLocalDisplayName(): string | null {
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("overview");
   const [displayName, setDisplayName] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>("2026-11-01");
+  const [selectedDate, setSelectedDate] = useState<string>(() => formatLocalDateStr());
 
   useEffect(() => {
     setDisplayName(getLocalDisplayName());

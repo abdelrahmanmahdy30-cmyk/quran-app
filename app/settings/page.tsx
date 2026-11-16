@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { MainLayout } from "@/components/layout/main-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,21 +8,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
-import { useMemorizationStore } from "@/lib/memorization-store";
 import { QURAN_EDITIONS } from "@/lib/quran-editions";
-import { surahs } from "@/lib/quran-data";
 import {
   loadUnifiedRecord,
   exportPlanAsJson,
   importPlanFromJson,
+  updatePlanStartDate,
+  formatLocalDateStr,
+  getAllPlanDays,
 } from "@/lib/unified-plan-store";
+import type { StudyDay } from "@/lib/six-month-plan-types";
+import { usePlanProgress } from "@/lib/use-plan-progress";
 import { Upload } from "lucide-react";
 import { StartPlanDialog } from "@/components/plan/start-plan-dialog";
-import { 
-  Settings, 
+import {
+  Settings,
   Target,
-  Compass, 
-  Bell, 
+  Compass,
+  Bell,
   RotateCcw,
   Save,
   Clock,
@@ -31,7 +34,7 @@ import {
   BookOpen,
   CalendarDays,
   ShieldAlert,
-  Award
+  Award,
 } from "lucide-react";
 import {
   AlertDialog,
@@ -53,28 +56,78 @@ import {
 } from "@/components/ui/select";
 
 export default function SettingsPage() {
+  // ─── Unified plan data ────────────────────────────────────────────────────
   const {
-    stats,
-    progress,
-    dailyGoals,
-    planConfig,
+    record,
+    allDays,
+    khatmaDate,
+    dailyQuota,
+    daysRemaining,
     resetProgress,
-    updatePlanSettings,
-    updatePlanConfig,
-    getTodaysGoal,
-    activateEmergencyPause,
-    deactivateEmergencyPause,
-    activateBreakRecovery,
-    deactivateBreakRecovery,
-    activatePostCompletion,
-    deactivatePostCompletion,
-  } = useMemorizationStore();
+  } = usePlanProgress();
 
-    const [importStatus, setImportStatus] = useState<string | null>(null);
+  // ─── Import / export state ────────────────────────────────────────────────
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
-  const exportUnifiedJson = () => {
-    const record = loadUnifiedRecord();
-    const content = exportPlanAsJson(record);
+  // ─── Preference state (UI-only, stored in localStorage) ───────────────────
+  const [editionId, setEditionId] = useState("madinah_604");
+  const [memorizeDaysPerWeek, setMemorizeDaysPerWeek] = useState(6);
+  const [userLevel, setUserLevel] = useState("intermediate");
+  const [dailyAvailableMinutes, setDailyAvailableMinutes] = useState(45);
+  const [hasPriorMemorization, setHasPriorMemorization] = useState(false);
+
+  // ─── Plan start-date (writable) ───────────────────────────────────────────
+  const [startDate, setStartDate] = useState<string>(record.startDate);
+
+  // ─── Notifications (localStorage only) ───────────────────────────────────
+  const [notifications, setNotifications] = useState(true);
+  const [reminderTime, setReminderTime] = useState("06:00");
+  const [reviewReminder, setReviewReminder] = useState(true);
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // ─── Sync startDate when record changes (e.g. after import) ──────────────
+  useEffect(() => {
+    setStartDate(record.startDate);
+  }, [record.startDate]);
+
+  // ─── Load UI prefs from localStorage once ─────────────────────────────────
+  useEffect(() => {
+    try {
+      const savedNotifs = localStorage.getItem("hafiz-settings-notifications");
+      if (savedNotifs) {
+        const parsed = JSON.parse(savedNotifs) as {
+          notifications?: boolean;
+          reminderTime?: string;
+          reviewReminder?: boolean;
+        };
+        if (typeof parsed.notifications === "boolean") setNotifications(parsed.notifications);
+        if (parsed.reminderTime) setReminderTime(parsed.reminderTime);
+        if (typeof parsed.reviewReminder === "boolean") setReviewReminder(parsed.reviewReminder);
+      }
+
+      const savedPrefs = localStorage.getItem("hafiz-settings-prefs");
+      if (savedPrefs) {
+        const prefs = JSON.parse(savedPrefs) as {
+          editionId?: string;
+          memorizeDaysPerWeek?: number;
+          userLevel?: string;
+          dailyAvailableMinutes?: number;
+          hasPriorMemorization?: boolean;
+        };
+        if (prefs.editionId) setEditionId(prefs.editionId);
+        if (prefs.memorizeDaysPerWeek) setMemorizeDaysPerWeek(prefs.memorizeDaysPerWeek);
+        if (prefs.userLevel) setUserLevel(prefs.userLevel);
+        if (prefs.dailyAvailableMinutes) setDailyAvailableMinutes(prefs.dailyAvailableMinutes);
+        if (typeof prefs.hasPriorMemorization === "boolean")
+          setHasPriorMemorization(prefs.hasPriorMemorization);
+      }
+    } catch {}
+  }, []);
+
+  // ─── Export unified JSON ──────────────────────────────────────────────────
+  const exportUnifiedJson = useCallback(() => {
+    const latestRecord = loadUnifiedRecord();
+    const content = exportPlanAsJson(latestRecord);
     const blob = new Blob([content], { type: "application/json;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -82,12 +135,12 @@ export default function SettingsPage() {
     a.download = `hafiz-unified-plan-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  };
+  }, []);
 
-  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ─── Import JSON ──────────────────────────────────────────────────────────
+  const handleImportJson = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
@@ -101,101 +154,83 @@ export default function SettingsPage() {
       }
     };
     reader.readAsText(file);
-  };
-const exportData = (format: "json" | "csv") => {
-    const payload = { exportedAt: new Date().toISOString(), stats, progress, dailyGoals, planConfig };
-    const content = format === "json"
-      ? JSON.stringify(payload, null, 2)
-      : [
-          "السورة,الآيات المحفوظة,القوة,الحالة,آخر مراجعة",
-          ...progress.map((item) => `${item.surahId},${item.versesMemorized},${item.strength},${item.status},${item.lastReview ?? ""}`),
-        ].join("\n");
-    const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" });
+  }, []);
+
+  // ─── Export CSV (progress summary from unified record) ───────────────────
+  const exportCsv = useCallback(() => {
+    const latestRecord = loadUnifiedRecord();
+    const days = getAllPlanDays(latestRecord);
+    const header = "اليوم,التاريخ,الصفحات,مكتمل";
+    const rows = days.map((d, i) => {
+      const done = latestRecord.steps[d.date] !== undefined;
+      const pageNums = d.type === "study" ? (d as StudyDay).newPages.join("،") : "راحة";
+      return `${i + 1},${d.date},"${pageNums}",${done ? "نعم" : "لا"}`;
+    });
+    const content = [header, ...rows].join("\n");
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `hafiz-progress.${format}`;
+    link.download = "hafiz-progress.csv";
     link.click();
     URL.revokeObjectURL(url);
-  };
-  
-  const currentGoal = getTodaysGoal();
-  const [dailyTarget, setDailyTarget] = useState(currentGoal.targetVerses || 52);
-  const [planMonths, setPlanMonths] = useState(planConfig.targetDurationMonths.toString() || "4");
-  const [startDate, setStartDate] = useState(stats.startDate.split("T")[0]);
-  const [targetEndDate, setTargetEndDate] = useState(stats.targetEndDate.split("T")[0]);
-  
-  // المعايير الذكية الإضافية
-  const [editionId, setEditionId] = useState(planConfig.editionId || "madinah_604");
-  const [memorizeDaysPerWeek, setMemorizeDaysPerWeek] = useState(planConfig.memorizeDaysPerWeek || 6);
-  const [userLevel, setUserLevel] = useState(planConfig.userLevel || "intermediate");
-  const [dailyAvailableMinutes, setDailyAvailableMinutes] = useState(planConfig.dailyAvailableMinutes || 45);
-  const [hasPriorMemorization, setHasPriorMemorization] = useState(planConfig.hasPriorMemorization || false);
-
-  const [notifications, setNotifications] = useState(true);
-  const [reminderTime, setReminderTime] = useState("06:00");
-  const [reviewReminder, setReviewReminder] = useState(true);
-  const [savedSuccess, setSavedSuccess] = useState(false);
-
-  useEffect(() => {
-    try {
-      const savedNotifs = localStorage.getItem("hafiz-settings-notifications");
-      if (savedNotifs) {
-        const parsed = JSON.parse(savedNotifs);
-        if (typeof parsed.notifications === "boolean") setNotifications(parsed.notifications);
-        if (parsed.reminderTime) setReminderTime(parsed.reminderTime);
-        if (typeof parsed.reviewReminder === "boolean") setReviewReminder(parsed.reviewReminder);
-      }
-    } catch {}
   }, []);
 
-  const handlePlanMonthsChange = (months: string) => {
-    setPlanMonths(months);
-    const m = parseInt(months, 10);
-    const start = new Date(startDate);
-    const newEnd = new Date(start);
-    newEnd.setMonth(newEnd.getMonth() + m);
-    setTargetEndDate(newEnd.toISOString().split("T")[0]);
+  // ─── Save settings ────────────────────────────────────────────────────────
+  const handleSave = useCallback(() => {
+    // 1. Update startDate in unified store (only if changed)
+    const latestRecord = loadUnifiedRecord();
+    if (startDate && startDate !== latestRecord.startDate) {
+      updatePlanStartDate(latestRecord, startDate);
+    }
 
-    const days = m * 30;
-    const recommendedVerses = Math.ceil(6236 / days);
-    setDailyTarget(recommendedVerses);
-  };
-
-  const handleSave = () => {
-    updatePlanSettings({
-      dailyTarget,
-      startDate: new Date(startDate).toISOString(),
-      targetEndDate: new Date(targetEndDate).toISOString(),
-    });
-
-    updatePlanConfig({
-      editionId: editionId as any,
-      totalPages: editionId === "shamarly_521" ? 521 : 604,
-      targetDurationMonths: parseInt(planMonths, 10),
-      pagesPerDay: Math.max(1, Math.round(dailyTarget / 15)),
-      memorizeDaysPerWeek,
-      restDays: memorizeDaysPerWeek === 5 ? [4, 5] : memorizeDaysPerWeek === 6 ? [5] : [],
-      userLevel: userLevel as any,
-      dailyAvailableMinutes,
-      hasPriorMemorization,
-      startDate,
-      targetEndDate,
-    });
-
+    // 2. Save notification prefs
     try {
       localStorage.setItem(
         "hafiz-settings-notifications",
         JSON.stringify({ notifications, reminderTime, reviewReminder })
       );
-      if (notifications && typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      if (
+        notifications &&
+        typeof window !== "undefined" &&
+        "Notification" in window &&
+        Notification.permission === "default"
+      ) {
         Notification.requestPermission();
       }
     } catch {}
 
+    // 3. Save UI prefs
+    try {
+      localStorage.setItem(
+        "hafiz-settings-prefs",
+        JSON.stringify({
+          editionId,
+          memorizeDaysPerWeek,
+          userLevel,
+          dailyAvailableMinutes,
+          hasPriorMemorization,
+        })
+      );
+    } catch {}
+
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
-  };
+  }, [
+    startDate,
+    notifications,
+    reminderTime,
+    reviewReminder,
+    editionId,
+    memorizeDaysPerWeek,
+    userLevel,
+    dailyAvailableMinutes,
+    hasPriorMemorization,
+  ]);
+
+  // ─── Derived display values from unified store ────────────────────────────
+  const planDurationDays = allDays.length; // دائماً 181 يوماً
+  const planMonthsDisplay = Math.round(planDurationDays / 30); // ≈ 6 أشهر
 
   return (
     <MainLayout>
@@ -211,6 +246,39 @@ const exportData = (format: "json" | "csv") => {
           </p>
         </div>
 
+        {/* ملخص الخطة الحالية */}
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-foreground flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-gold" />
+              ملخص الخطة الحالية
+            </CardTitle>
+            <CardDescription>
+              بيانات حية من السجل الموحد — تتطابق مع لوحة التحكم والخطة والإحصائيات
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+              <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                <p className="text-xs text-muted-foreground mb-1">تاريخ البداية</p>
+                <p className="text-sm font-bold text-foreground">{record.startDate}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                <p className="text-xs text-muted-foreground mb-1">تاريخ الختمة</p>
+                <p className="text-sm font-bold text-gold">{khatmaDate}</p>
+              </div>
+              <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                <p className="text-xs text-muted-foreground mb-1">الورد اليومي</p>
+                <p className="text-sm font-bold text-foreground">{dailyQuota} صفحة</p>
+              </div>
+              <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                <p className="text-xs text-muted-foreground mb-1">الأيام المتبقية</p>
+                <p className="text-sm font-bold text-foreground">{daysRemaining} يوم</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* إعدادات الهدف والخطة */}
         <Card className="bg-card border-border">
           <CardHeader>
@@ -223,7 +291,7 @@ const exportData = (format: "json" | "csv") => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* تخصيص نقطة البداية (المرحلة 3.6) */}
+            {/* تخصيص نقطة البداية */}
             <div className="p-4 rounded-2xl border border-gold/30 bg-gold/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="space-y-1">
                 <p className="text-sm font-bold text-foreground flex items-center gap-2">
@@ -244,13 +312,13 @@ const exportData = (format: "json" | "csv") => {
               />
             </div>
 
-            {/* طبعة المصحف المعتمدة */}
+            {/* طبعة المصحف */}
             <div className="space-y-2">
               <Label className="text-foreground flex items-center gap-2">
                 <BookOpen className="h-4 w-4 text-gold" />
                 طبعة المصحف المعتمدة
               </Label>
-              <Select value={editionId} onValueChange={(v) => setEditionId(v as any)}>
+              <Select value={editionId} onValueChange={(v) => setEditionId(v)}>
                 <SelectTrigger className="bg-secondary border-border">
                   <SelectValue placeholder="اختر طبعة المصحف" />
                 </SelectTrigger>
@@ -265,45 +333,21 @@ const exportData = (format: "json" | "csv") => {
               </p>
             </div>
 
-            {/* الهدف اليومي */}
-            <div className="space-y-4">
+            {/* الهدف اليومي للحفظ (عرض من المتجر الموحد) */}
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-foreground">الهدف اليومي للحفظ</Label>
-                <span className="text-lg font-bold text-gold">{dailyTarget} آية (~{Math.max(1, Math.round(dailyTarget / 15))} صفحة)</span>
+                <Label className="text-foreground">الورد اليومي (من الخطة الموحدة)</Label>
+                <span className="text-lg font-bold text-gold">{dailyQuota} صفحة</span>
               </div>
-              <Slider
-                value={[dailyTarget]}
-                onValueChange={(v) => setDailyTarget(v[0])}
-                min={10}
-                max={150}
-                step={1}
-                className="w-full"
-              />
               <p className="text-xs text-muted-foreground">
-                الموصى به لإنهاء القرآن في {planMonths} أشهر: {Math.ceil(6236 / (parseInt(planMonths, 10) * 30))} آية يومياً
+                محسوب تلقائياً بناءً على خطة {planDurationDays} يوماً (~{planMonthsDisplay} أشهر)
               </p>
             </div>
 
-            {/* مدة الخطة وأيام الحفظ أسبوعياً */}
+            {/* أيام الحفظ أسبوعياً ومستوى المستخدم */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-foreground">مدة خطة الحفظ</Label>
-                <Select value={planMonths} onValueChange={handlePlanMonthsChange}>
-                  <SelectTrigger className="bg-secondary border-border">
-                    <SelectValue placeholder="اختر المدة" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-card border-border">
-                    <SelectItem value="3">3 أشهر (مكثف جداً)</SelectItem>
-                    <SelectItem value="4">4 أشهر (مكثف)</SelectItem>
-                    <SelectItem value="6">6 أشهر (متوسط)</SelectItem>
-                    <SelectItem value="12">سنة كاملة (مريح)</SelectItem>
-                    <SelectItem value="18">سنة ونصف (هادئ)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-foreground">أيام الحفظ أسبوعياً (وأيام الراحة)</Label>
+                <Label className="text-foreground">أيام الحفظ أسبوعياً (تفضيل)</Label>
                 <Select value={memorizeDaysPerWeek.toString()} onValueChange={(v) => setMemorizeDaysPerWeek(Number(v))}>
                   <SelectTrigger className="bg-secondary border-border">
                     <SelectValue />
@@ -315,13 +359,10 @@ const exportData = (format: "json" | "csv") => {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* مستوى المستخدم والوقت اليومي المتاح */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-foreground">مستوى الحفظ الحالي</Label>
-                <Select value={userLevel} onValueChange={(v) => setUserLevel(v as any)}>
+                <Select value={userLevel} onValueChange={(v) => setUserLevel(v)}>
                   <SelectTrigger className="bg-secondary border-border">
                     <SelectValue />
                   </SelectTrigger>
@@ -332,44 +373,52 @@ const exportData = (format: "json" | "csv") => {
                   </SelectContent>
                 </Select>
               </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-foreground flex items-center gap-1.5">
-                    <Clock className="h-4 w-4" />
-                    الوقت اليومي المتاح
-                  </Label>
-                  <span className="text-xs font-bold text-gold">{dailyAvailableMinutes} دقيقة</span>
-                </div>
-                <Slider
-                  value={[dailyAvailableMinutes]}
-                  onValueChange={(v) => setDailyAvailableMinutes(v[0])}
-                  min={15}
-                  max={120}
-                  step={5}
-                />
-              </div>
             </div>
 
-            {/* تاريخ البداية والهدف */}
+            {/* الوقت اليومي المتاح */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-foreground flex items-center gap-1.5">
+                  <Clock className="h-4 w-4" />
+                  الوقت اليومي المتاح
+                </Label>
+                <span className="text-xs font-bold text-gold">{dailyAvailableMinutes} دقيقة</span>
+              </div>
+              <Slider
+                value={[dailyAvailableMinutes]}
+                onValueChange={(v) => setDailyAvailableMinutes(v[0])}
+                min={15}
+                max={120}
+                step={5}
+              />
+            </div>
+
+            {/* تاريخ البداية (قابل للتعديل) */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-foreground">تاريخ البداية</Label>
-                <Input 
-                  type="date" 
+                <Input
+                  type="date"
                   value={startDate}
+                  max={formatLocalDateStr()}
                   onChange={(e) => setStartDate(e.target.value)}
                   className="bg-secondary border-border"
                 />
+                <p className="text-xs text-muted-foreground">
+                  لا يمكن اختيار تاريخ مستقبلي. تغيير التاريخ يُعيد حساب الجدول.
+                </p>
               </div>
               <div className="space-y-2">
-                <Label className="text-foreground">تاريخ الهدف (الختمة)</Label>
-                <Input 
-                  type="date" 
-                  value={targetEndDate}
-                  onChange={(e) => setTargetEndDate(e.target.value)}
-                  className="bg-secondary border-border"
+                <Label className="text-foreground">تاريخ الختمة (محسوب)</Label>
+                <Input
+                  type="date"
+                  value={khatmaDate}
+                  readOnly
+                  className="bg-secondary/50 border-border opacity-70 cursor-not-allowed"
                 />
+                <p className="text-xs text-muted-foreground">
+                  مشتق تلقائياً من الخطة الموحدة (181 يوم دراسي)
+                </p>
               </div>
             </div>
 
@@ -389,112 +438,7 @@ const exportData = (format: "json" | "csv") => {
           </CardContent>
         </Card>
 
-        {/* الظروف الطارئة والاستعادة ومرحلة ما بعد الختم */}
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-foreground flex items-center gap-2">
-              <ShieldAlert className="h-5 w-5 text-amber-400" />
-              الظروف الطارئة ومرحلة ما بعد الختم
-            </CardTitle>
-            <CardDescription>
-              التحكم في التوقف المؤقت للظروف الطارئة، العودة بعد الانقطاع، ومرحلة تثبيت القرآن
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* التوقف الطارئ */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/30 border border-border">
-              <div>
-                <p className="text-sm font-semibold text-foreground">وضع التوقف الطارئ (سفر / مرض / عذر)</p>
-                <p className="text-xs text-muted-foreground">
-                  {planConfig.emergencyPause?.isActive
-                    ? `نشط حالياً (السبب: ${planConfig.emergencyPause.reason})`
-                    : "تجميد الخطة مؤقتاً دون احتساب إخفاق في السلسلة أو انهيار الجدول"}
-                </p>
-              </div>
-              {planConfig.emergencyPause?.isActive ? (
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => deactivateEmergencyPause()}
-                >
-                  استئناف الخطة
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => activateEmergencyPause("voluntary")}
-                  className="border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
-                >
-                  تفعيل التوقف
-                </Button>
-              )}
-            </div>
-
-            {/* العودة بعد الانقطاع */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/30 border border-border">
-              <div>
-                <p className="text-sm font-semibold text-foreground">وضع العودة بعد الانقطاع (الاستعادة التدريجية)</p>
-                <p className="text-xs text-muted-foreground">
-                  {planConfig.breakRecovery?.isActive
-                    ? "الوضع نشط حالياً مع تخفيف الحفظ بنسبة 50%"
-                    : "تشخيص مستوى المحفوظ وتخفيف الحفظ الجديد للتركيز على استقرار المراجعة"}
-                </p>
-              </div>
-              {planConfig.breakRecovery?.isActive ? (
-                <Button
-                  size="sm"
-                  onClick={() => deactivateBreakRecovery()}
-                  className="bg-blue-500 text-white hover:bg-blue-600"
-                >
-                  إنهاء وضع التعافي
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => activateBreakRecovery(14)}
-                  className="border-blue-500/40 text-blue-400 hover:bg-blue-500/10"
-                >
-                  تفعيل الاستعادة
-                </Button>
-              )}
-            </div>
-
-            {/* ما بعد الختم */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-secondary/30 border border-border">
-              <div>
-                <p className="text-sm font-semibold text-foreground">مرحلة تثبيت القرآن والمحافظة عليه</p>
-                <p className="text-xs text-muted-foreground">
-                  {planConfig.postCompletion?.isActive
-                    ? `نشط حالياً: دورة ختمة كل ${planConfig.postCompletion.cycleDays} يوماً`
-                    : "دورات مراجعة مستمرة لكامل القرآن بعد الختم للحفاظ عليه مدى الحياة"}
-                </p>
-              </div>
-              {planConfig.postCompletion?.isActive ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => deactivatePostCompletion()}
-                  className="border-purple-500/40 text-purple-400"
-                >
-                  إيقاف مؤقت
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => activatePostCompletion(30)}
-                  className="border-purple-500/40 text-purple-400 hover:bg-purple-500/10"
-                >
-                  بدء دورة التثبيت
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* إعدادات التنبيهات الأصلية */}
+        {/* إعدادات التنبيهات */}
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-foreground flex items-center gap-2">
@@ -523,8 +467,8 @@ const exportData = (format: "json" | "csv") => {
                   <Clock className="h-4 w-4" />
                   وقت التذكير
                 </Label>
-                <Input 
-                  type="time" 
+                <Input
+                  type="time"
                   value={reminderTime}
                   onChange={(e) => setReminderTime(e.target.value)}
                   className="bg-secondary border-border w-40"
@@ -545,7 +489,7 @@ const exportData = (format: "json" | "csv") => {
           </CardContent>
         </Card>
 
-        {/* البيانات */}
+        {/* إدارة البيانات */}
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-foreground flex items-center gap-2">
@@ -558,7 +502,7 @@ const exportData = (format: "json" | "csv") => {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-3">
-              <Button variant="outline" onClick={() => exportUnifiedJson()} className="gap-2 border-gold/40 text-gold hover:bg-gold/10">
+              <Button variant="outline" onClick={exportUnifiedJson} className="gap-2 border-gold/40 text-gold hover:bg-gold/10">
                 <Download className="h-4 w-4" /> تصدير السجل الموحد (JSON)
               </Button>
               <label className="inline-flex">
@@ -574,7 +518,7 @@ const exportData = (format: "json" | "csv") => {
                   onChange={handleImportJson}
                 />
               </label>
-              <Button variant="outline" onClick={() => exportData("csv")} className="gap-2 border-border text-xs">
+              <Button variant="outline" onClick={exportCsv} className="gap-2 border-border text-xs">
                 <Download className="h-4 w-4" /> تصدير CSV
               </Button>
             </div>
@@ -606,7 +550,7 @@ const exportData = (format: "json" | "csv") => {
                   </AlertDialogHeader>
                   <AlertDialogFooter className="gap-2">
                     <AlertDialogCancel className="border-border">إلغاء</AlertDialogCancel>
-                    <AlertDialogAction 
+                    <AlertDialogAction
                       onClick={() => {
                         if (window.prompt("اكتب كلمة تأكيد للمتابعة:") === "تأكيد") resetProgress();
                       }}

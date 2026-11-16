@@ -870,3 +870,29 @@ export function importPlanFromJson(
     return { success: false, error: err?.message || 'Invalid JSON' };
   }
 }
+
+/**
+ * تحديث تاريخ بداية الخطة مع الحفاظ على الصفحات المحفوظة والتقييمات.
+ * يُعيد حساب الجدول الكامل من التاريخ الجديد عبر إعادة تحميل السجل.
+ * يُعيد السجل المحدَّث ويحفظه في localStorage.
+ */
+export function updatePlanStartDate(
+  record: UnifiedPlanRecord,
+  newStartDate: string,
+  todayStr: string = formatLocalDateStr()
+): UnifiedPlanRecord {
+  if (!newStartDate || newStartDate === record.startDate) return record;
+  if (newStartDate > todayStr) {
+    console.warn('[UnifiedPlanStore] Cannot set future start date');
+    return record;
+  }
+  const nextRecord: UnifiedPlanRecord = {
+    ...record,
+    startDate: newStartDate,
+    // steps و frozenDays مفتاحها تاريخ مطلق؛ تغيير startDate يُبطل دلالتها
+    steps: {},
+    frozenDays: {},
+  };
+  saveUnifiedRecord(nextRecord);
+  return nextRecord;
+}
