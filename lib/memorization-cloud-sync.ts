@@ -1,6 +1,6 @@
 "use client";
 
-import { createClient } from "./supabase/client";
+import { createClient, isSupabaseConfigured } from "./supabase/client";
 import { useMemorizationStore } from "./memorization-store";
 import { surahs, type MemorizationProgress, type DailyGoal, type UserStats } from "./quran-data";
 
@@ -11,7 +11,7 @@ let isHydrating = false;
  * جلب بيانات الحفظ من Supabase ومزامنتها مع Zustand محلياً
  */
 export async function hydrateMemorizationFromCloud(): Promise<void> {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !isSupabaseConfigured()) return;
 
   try {
     const supabase = createClient();
@@ -157,7 +157,7 @@ export async function hydrateMemorizationFromCloud(): Promise<void> {
  * رفع الحالة الحالية إلى Supabase مع حماية بالـ debounce
  */
 export async function syncMemorizationToCloud(): Promise<void> {
-  if (typeof window === "undefined" || isHydrating) return;
+  if (typeof window === "undefined" || isHydrating || !isSupabaseConfigured()) return;
 
   try {
     const supabase = createClient();
@@ -223,7 +223,7 @@ export async function syncMemorizationToCloud(): Promise<void> {
  * بدء الاستماع ومزامنة السحابة تلقائياً
  */
 export function startMemorizationCloudSync(): () => void {
-  if (typeof window === "undefined") return () => {};
+  if (typeof window === "undefined" || !isSupabaseConfigured()) return () => {};
 
   // تشغيل الجلب الأولي فور التحميل
   hydrateMemorizationFromCloud();

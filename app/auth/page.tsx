@@ -3,7 +3,7 @@
 import { FormEvent, useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,9 +27,17 @@ export default function AuthPage() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) router.push('/')
+      if (!isSupabaseConfigured()) {
+        setIsChecking(false);
+        return;
+      }
+      try {
+        const supabase = createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) router.push('/')
+      } catch {
+        // ignore
+      }
       setIsChecking(false)
     }
     checkAuth()
