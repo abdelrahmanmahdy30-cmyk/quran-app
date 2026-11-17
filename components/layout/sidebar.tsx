@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { usePlanProgress } from "@/lib/use-plan-progress";
 import { 
   LayoutDashboard, 
   BookOpen, 
@@ -31,6 +32,21 @@ const navItems = [
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { allDays, khatmaDate, record } = usePlanProgress();
+
+  // استنتاج مدة الخطة من تاريخ البداية وتاريخ الختمة (بالأشهر)
+  const planMonths = (() => {
+    try {
+      const start = new Date(record.startDate);
+      const end = new Date(khatmaDate);
+      const diffMonths =
+        (end.getFullYear() - start.getFullYear()) * 12 +
+        (end.getMonth() - start.getMonth());
+      return diffMonths > 0 ? diffMonths : Math.round(allDays.length / 30);
+    } catch {
+      return Math.round(allDays.length / 30);
+    }
+  })();
 
   return (
     <>
@@ -113,10 +129,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           <div className="p-4 border-t border-sidebar-border">
             <div className="p-4 rounded-lg bg-gold/10 border border-gold/20">
               <p className="text-sm text-sidebar-foreground font-medium">
-                الهدف: 4 أشهر
+                الهدف: {planMonths} أشهر
               </p>
               <p className="text-xs text-sidebar-foreground/60 mt-1">
-                ابدأ رحلتك في حفظ القرآن الكريم
+                {khatmaDate ? `الختمة: ${khatmaDate}` : "ابدأ رحلتك في حفظ القرآن الكريم"}
               </p>
             </div>
           </div>
