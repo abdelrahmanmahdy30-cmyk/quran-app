@@ -25,6 +25,12 @@ export interface GeneratePlanFromOptions {
   today?: string; // YYYY-MM-DD
   wrapAround?: boolean;
   priorPagesMemorized?: boolean;
+  /**
+   * صفحات محفوظة مسبقاً من سور كاملة (محسوبة قبل الاستدعاء عبر computeFullyCoveredPages).
+   * تُستبعد من newPages وتدخل مباشرةً في مصدر المراجعة البعيدة.
+   * الصفحات المشتركة بين سورة محفوظة وأخرى غير محفوظة يجب ألا تُدرج هنا.
+   */
+  priorCoveredPages?: number[];
 }
 
 /**
@@ -47,6 +53,10 @@ export function generatePlanFrom(options: GeneratePlanFromOptions = {}): MonthPl
   const priorPagesMemorized = !!options.priorPagesMemorized;
   const memorizedPages = options.memorizedPages ? [...options.memorizedPages] : [];
   const frozenDays = options.frozenDays || {};
+  // الصفحات المغطاة بالكامل من سور محفوظة مسبقاً (محسوبة خارجياً لتفادي الدورة المرجعية)
+  const priorCoveredPages: number[] = options.priorCoveredPages
+    ? options.priorCoveredPages.filter((p) => p >= 1 && p <= 604)
+    : [];
 
   // الحالة المعيارية النظيفة: ص 1 وتاريخ 2026-11-01 بلا تقدم ولا تجمد
   if (
@@ -55,7 +65,8 @@ export function generatePlanFrom(options: GeneratePlanFromOptions = {}): MonthPl
     !wrapAround &&
     !priorPagesMemorized &&
     memorizedPages.length === 0 &&
-    Object.keys(frozenDays).length === 0
+    Object.keys(frozenDays).length === 0 &&
+    priorCoveredPages.length === 0
   ) {
     return generatePlan({ startDate: startDateStr, totalPages: 604 });
   }
@@ -75,7 +86,10 @@ export function generatePlanFrom(options: GeneratePlanFromOptions = {}): MonthPl
     for (let p = 1; p < startPage; p++) priorPages.push(p);
   }
 
-  const memorizedSet = new Set<number>([...priorPages, ...memorizedPages]);
+  // 3. الصفحات المغطاة بسور محفوظة بالكامل: تُستبعد من الحفظ الجديد وتدخل المراجعة البعيدة
+  //    (priorCoveredPages تُزال من targetPagesSequence فقط، ولا تُعدّل priorPages)
+
+  const memorizedSet = new Set<number>([...priorPages, ...memorizedPages, ...priorCoveredPages]);
   const remainingPagesToMemorize = targetPagesSequence.filter((p) => !memorizedSet.has(p));
 
   const [startYear, startMonth, startDay] = startDateStr.split("-").map(Number);
@@ -88,7 +102,13 @@ export function generatePlanFrom(options: GeneratePlanFromOptions = {}): MonthPl
 
   // سجل صفحات الحفظ لكل يوم دراسي لاستخراج القريبة بدقة
   const studyDayPagesHistory = new Map<number, PageEntry[]>();
-  const allMemorizedSoFar: number[] = [...priorPages];
+  // allMemorizedSoFar: يبدأ بالصفحات السابقة (priorPages) + المغطاة بالسور المحفوظة
+  // كلاهما يدخل المراجعة البعيدة من اليوم الأول
+  const priorPagesSet = new Set<number>(priorPages);
+  const allMemorizedSoFar: number[] = [
+    ...priorPages,
+    ...priorCoveredPages.filter((p) => !priorPagesSet.has(p)),
+  ];
   const allMemorizedSet = new Set<number>(allMemorizedSoFar);
 
   const monthsMap = new Map<string, MonthPlan>();

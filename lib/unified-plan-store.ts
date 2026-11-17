@@ -32,10 +32,18 @@ export function getAllPlanDays(record?: UnifiedPlanRecord): PlanDay[] {
       !record.wrapAround &&
       !record.priorPagesMemorized &&
       (!record.memorizedPages || record.memorizedPages.length === 0) &&
-      (!record.frozenDays || Object.keys(record.frozenDays).length === 0))
+      (!record.frozenDays || Object.keys(record.frozenDays).length === 0) &&
+      (!record.priorMemorizedSurahs || record.priorMemorizedSurahs.length === 0))
   ) {
     return generatePlan().flatMap((m) => m.days);
   }
+
+  // احسب الصفحات المغطاة بالكامل من السور المحفوظة مسبقاً (قبل تمريرها للمولد)
+  const priorCoveredPages =
+    record.priorMemorizedSurahs && record.priorMemorizedSurahs.length > 0
+      ? computeFullyCoveredPages(record.priorMemorizedSurahs)
+      : [];
+
   return generatePlanFrom({
     startPage: record.startPage,
     startDate: record.startDate,
@@ -44,6 +52,7 @@ export function getAllPlanDays(record?: UnifiedPlanRecord): PlanDay[] {
     today: formatLocalDateStr(),
     wrapAround: record.wrapAround,
     priorPagesMemorized: record.priorPagesMemorized,
+    priorCoveredPages,
   }).flatMap((m) => m.days);
 }
 
@@ -70,6 +79,7 @@ export interface UnifiedPlanRecord {
   startDate: string;
   wrapAround: boolean;
   priorPagesMemorized: boolean;
+  priorMemorizedSurahs?: number[]; // أرقام السور المحفوظة بالكامل (1..114)
   memorizedPages: number[];
   steps: Record<string, DayStepsState>;
   frozenDays: Record<string, DaySnapshot>;
@@ -114,6 +124,7 @@ export function createCleanRecord(planId: string = DEFAULT_PLAN_ID): UnifiedPlan
     startDate: '2026-11-01',
     wrapAround: false,
     priorPagesMemorized: false,
+    priorMemorizedSurahs: [],
     memorizedPages: [],
     steps: {},
     frozenDays: {},
@@ -178,6 +189,16 @@ export function validateAndSanitizeRecord(data: any, todayStr: string = formatLo
     startDate: typeof data.startDate === 'string' ? data.startDate : '2026-11-01',
     wrapAround: Boolean(data.wrapAround),
     priorPagesMemorized: Boolean(data.priorPagesMemorized),
+    priorMemorizedSurahs: Array.isArray(data.priorMemorizedSurahs)
+      ? Array.from(new Set<number>(
+          data.priorMemorizedSurahs.filter((n: any): n is number =>
+            typeof n === 'number' &&
+            Number.isInteger(n) &&
+            n >= 1 &&
+            n <= 114
+          )
+        )).sort((a: number, b: number) => a - b)
+      : [],
     memorizedPages: validPages,
     steps: validSteps,
     frozenDays: validFrozen,
@@ -556,6 +577,52 @@ export function unmarkPage(
 }
 
 /**
+ * يحسب الصفحات المغطاة بالكامل من قائمة أرقام السور المحفوظة.
+ * الصفحة تُعتبر مغطاة فقط إذا كانت كل آياتها تنتمي لسور موجودة في fullSurahIds.
+ * الصفحات المشتركة بين سورة محفوظة وأخرى غير محفوظة لا تُرجع.
+ * دالة نقية (Pure): لا تلمس localStorage ولا تعدل السجل.
+ */
+export function computeFullyCoveredPages(fullSurahIds: number[]): number[] {
+  if (!fullSurahIds || fullSurahIds.length === 0) return [];
+  const surahsSet = new Set(fullSurahIds);
+  const covered: number[] = [];
+
+  for (let p = 1; p <= 604; p++) {
+    const ayahs = Array.from(hafs.ayahsInPage(p as Page));
+    if (ayahs.length === 0) continue;
+    // الصفحة مغطاة فقط إذا كانت كل آياتها تنتمي لسور محفوظة
+    if (ayahs.every(([s]) => surahsSet.has(s))) {
+      covered.push(p);
+    }
+  }
+
+  return covered;
+}
+
+/**
+ * تحديث قائمة السور المحفوظة مسبقاً في السجل الموحد.
+ * لا تعدل memorizedPages أو ratings أو steps أو frozenDays.
+ */
+export function updatePriorMemorizedSurahs(
+  record: UnifiedPlanRecord,
+  surahIds: number[]
+): UnifiedPlanRecord {
+  // تنظيف: إزالة المكررات والأرقام خارج النطاق 1..114
+  const cleaned = [...new Set(
+    surahIds.filter((n) => Number.isInteger(n) && n >= 1 && n <= 114)
+  )].sort((a, b) => a - b);
+
+  const nextRecord: UnifiedPlanRecord = {
+    ...record,
+    priorMemorizedSurahs: cleaned,
+    // لا تعديل على: memorizedPages, ratings, steps, frozenDays
+  };
+
+  saveUnifiedRecord(nextRecord);
+  return nextRecord;
+}
+
+/**
  * المحددات النقية (Pure Selectors)
  */
 
@@ -579,17 +646,20 @@ export function selectDaysRemaining(record: UnifiedPlanRecord, totalDays: number
 
 /**
  * اشتقاق تاريخ الختمة ديناميكياً من الخطة:
- * يبحث في مصفوفة أيام الخطة عن اليوم الدراسي الذي تُحفظ فيه آخر صفحة (604).
+ * يبحث عن آخر يوم دراسي يحتوي على صفحات حفظ جديدة (newPages.length > 0).
  */
 export function selectKhatmaDate(
   record?: UnifiedPlanRecord,
-  planDays: PlanDay[] = getAllPlanDays()
+  planDays: PlanDay[] = getAllPlanDays(record)
 ): string {
-  const targetLastPage = 604;
-  const khatmaDay = planDays.find(
-    (d) => d.type === 'study' && (d as StudyDay).newPages?.some((p) => p.p === targetLastPage)
-  );
-  return khatmaDay ? khatmaDay.date : '2027-04-29';
+  // آخر يوم دراسي يحتوي newPages (بدل البحث عن الصفحة 604 مباشرة)
+  let lastStudyDayWithPages: PlanDay | undefined;
+  for (const d of planDays) {
+    if (d.type === 'study' && (d as StudyDay).newPages && (d as StudyDay).newPages.length > 0) {
+      lastStudyDayWithPages = d;
+    }
+  }
+  return lastStudyDayWithPages ? lastStudyDayWithPages.date : '2027-04-29';
 }
 
 export const LOCKED_KHATMA_DATE = '2027-04-29';

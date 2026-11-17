@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { MainLayout } from "@/components/layout/main-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { QURAN_EDITIONS } from "@/lib/quran-editions";
+import { surahs } from "@/lib/quran-data";
 import {
   loadUnifiedRecord,
   exportPlanAsJson,
@@ -16,6 +17,8 @@ import {
   updatePlanStartDate,
   formatLocalDateStr,
   getAllPlanDays,
+  computeFullyCoveredPages,
+  updatePriorMemorizedSurahs,
 } from "@/lib/unified-plan-store";
 import type { StudyDay } from "@/lib/six-month-plan-types";
 import { usePlanProgress } from "@/lib/use-plan-progress";
@@ -74,7 +77,60 @@ export default function SettingsPage() {
   const [memorizeDaysPerWeek, setMemorizeDaysPerWeek] = useState(6);
   const [userLevel, setUserLevel] = useState("intermediate");
   const [dailyAvailableMinutes, setDailyAvailableMinutes] = useState(45);
-  const [hasPriorMemorization, setHasPriorMemorization] = useState(false);
+
+  // ─── Prior Memorized Surahs (from unified store) ──────────────────────────
+  const [selectedSurahIds, setSelectedSurahIds] = useState<number[]>(
+    () => record.priorMemorizedSurahs ?? []
+  );
+
+  // Sync when record changes (after save or import)
+  useEffect(() => {
+    setSelectedSurahIds(record.priorMemorizedSurahs ?? []);
+  }, [record.priorMemorizedSurahs]);
+
+  // Normalize: integers 1..114, deduplicated, sorted
+  const normalizedSelected = useMemo(
+    () =>
+      Array.from(new Set<number>(
+        selectedSurahIds.filter((n) => Number.isInteger(n) && n >= 1 && n <= 114)
+      )).sort((a, b) => a - b),
+    [selectedSurahIds]
+  );
+
+  const savedSurahs = record.priorMemorizedSurahs ?? [];
+
+  const isPriorSurahsUnchanged = useMemo(
+    () =>
+      normalizedSelected.length === savedSurahs.length &&
+      normalizedSelected.every((id, i) => id === savedSurahs[i]),
+    [normalizedSelected, savedSurahs]
+  );
+
+  const coveredPages = useMemo(
+    () => computeFullyCoveredPages(normalizedSelected),
+    [normalizedSelected]
+  );
+
+  const remainingNewPages = useMemo(() => {
+    const pageSet = new Set<number>();
+    for (const d of allDays) {
+      if (d.type === 'study') {
+        for (const p of (d as StudyDay).newPages) pageSet.add(p.p);
+      }
+    }
+    return pageSet.size;
+  }, [allDays]);
+
+  const handleSavePriorSurahs = useCallback(() => {
+    if (isPriorSurahsUnchanged) return;
+    updatePriorMemorizedSurahs(record, normalizedSelected);
+  }, [record, normalizedSelected, isPriorSurahsUnchanged]);
+
+  const toggleSurah = useCallback((surahId: number) => {
+    setSelectedSurahIds((prev) =>
+      prev.includes(surahId) ? prev.filter((s) => s !== surahId) : [...prev, surahId]
+    );
+  }, []);
 
   // ─── Plan start-date (writable) ───────────────────────────────────────────
   const [startDate, setStartDate] = useState<string>(record.startDate);
@@ -112,14 +168,11 @@ export default function SettingsPage() {
           memorizeDaysPerWeek?: number;
           userLevel?: string;
           dailyAvailableMinutes?: number;
-          hasPriorMemorization?: boolean;
         };
         if (prefs.editionId) setEditionId(prefs.editionId);
         if (prefs.memorizeDaysPerWeek) setMemorizeDaysPerWeek(prefs.memorizeDaysPerWeek);
         if (prefs.userLevel) setUserLevel(prefs.userLevel);
         if (prefs.dailyAvailableMinutes) setDailyAvailableMinutes(prefs.dailyAvailableMinutes);
-        if (typeof prefs.hasPriorMemorization === "boolean")
-          setHasPriorMemorization(prefs.hasPriorMemorization);
       }
     } catch {}
   }, []);
@@ -209,7 +262,6 @@ export default function SettingsPage() {
           memorizeDaysPerWeek,
           userLevel,
           dailyAvailableMinutes,
-          hasPriorMemorization,
         })
       );
     } catch {}
@@ -225,7 +277,6 @@ export default function SettingsPage() {
     memorizeDaysPerWeek,
     userLevel,
     dailyAvailableMinutes,
-    hasPriorMemorization,
   ]);
 
   // ─── Derived display values from unified store ────────────────────────────
@@ -423,17 +474,69 @@ export default function SettingsPage() {
             </div>
 
             {/* المحفوظ السابق */}
-            <div className="p-4 rounded-xl bg-secondary/40 border border-border flex items-center justify-between">
-              <div>
-                <Label className="text-foreground font-semibold">هل لديك محفوظ سابق؟</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  إدراج سورك المحفوظة في المراجعة البعيدة والمتوسطة دون تكرار حفظها كجديد
-                </p>
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center gap-2 pb-1 border-b border-border">
+                <Award className="h-5 w-5 text-gold" />
+                <h3 className="font-semibold text-foreground">المحفوظ السابق</h3>
               </div>
-              <Switch
-                checked={hasPriorMemorization}
-                onCheckedChange={setHasPriorMemorization}
-              />
+              <p className="text-xs text-muted-foreground">
+                حدّد السور التي حفظتها بالكامل سابقاً. ستُستبعد صفحاتها من الحفظ الجديد وتدخل في المراجعة البعيدة تلقائياً.
+              </p>
+
+              {/* ملخص الحالة */}
+              {(normalizedSelected.length > 0 || savedSurahs.length > 0) && (
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                    <p className="text-xs text-muted-foreground mb-1">السور المحددة</p>
+                    <p className="text-sm font-bold text-gold">{normalizedSelected.length}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                    <p className="text-xs text-muted-foreground mb-1">صفحات مستبعدة</p>
+                    <p className="text-sm font-bold text-foreground">{coveredPages.length}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-secondary/40 border border-border">
+                    <p className="text-xs text-muted-foreground mb-1">صفحات متبقية</p>
+                    <p className="text-sm font-bold text-foreground">{remainingNewPages}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* قائمة السور */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5 max-h-72 overflow-y-auto pr-1">
+                {surahs.map((surah) => {
+                  const isChecked = selectedSurahIds.includes(surah.id);
+                  return (
+                    <label
+                      key={surah.id}
+                      className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer text-xs border transition-colors ${
+                        isChecked
+                          ? 'bg-gold/15 border-gold/40 text-foreground'
+                          : 'bg-secondary/30 border-border text-muted-foreground hover:bg-secondary/60'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-gold"
+                        checked={isChecked}
+                        onChange={() => toggleSurah(surah.id)}
+                      />
+                      <span className="truncate">{surah.id}. {surah.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+
+              {/* زر الحفظ */}
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleSavePriorSurahs}
+                  disabled={isPriorSurahsUnchanged}
+                  className="bg-gold text-background hover:bg-gold/90 font-medium disabled:opacity-50"
+                >
+                  <Check className="h-4 w-4 ml-2" />
+                  حفظ المحفوظ السابق
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>
