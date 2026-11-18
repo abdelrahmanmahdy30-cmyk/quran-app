@@ -39,6 +39,7 @@ import {
   selectStreak,
   selectEffectiveMemorizedPages,
   deriveQuranProgress,
+  syncUnifiedProgressToLocalData,
   getRequiredStepsForDay,
   LOCKED_KHATMA_DATE,
   getActivePlanId,
@@ -88,6 +89,11 @@ export function usePlanProgress(explicitPlanId?: string) {
       window.removeEventListener("storage", handleStorage);
     };
   }, [planId]);
+
+  // مزامنة حالة المتجر القديم hafiz-quran-v1 في الذاكرة فورياً عند mount وأي تغير في السجل
+  useEffect(() => {
+    syncUnifiedProgressToLocalData(record);
+  }, [record]);
 
   // دوال الكتابة
   const markStepAction = useCallback(

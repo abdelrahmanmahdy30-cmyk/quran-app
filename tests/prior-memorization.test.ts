@@ -11,7 +11,9 @@ import {
   deriveQuranProgress,
   markStep,
   unmarkStep,
+  syncUnifiedProgressToLocalData,
 } from '../lib/unified-plan-store';
+import { useMemorizationStore } from '../lib/memorization-store';
 import type { StudyDay } from '../lib/six-month-plan-types';
 
 describe('Prior Memorization — computeFullyCoveredPages', () => {
@@ -342,5 +344,77 @@ describe('Prior Memorization — اتساق الأرقام بين الشريط �
     const surah4 = derived.surahs.find(s => s.surahId === 4)!;
     expect(surah4.status).toBe('completed');
     expect(derived.totalPagesMemorized).toBe(30);
+  });
+});
+
+describe('Prior Memorization — مزامنة متجر القرآن (syncUnifiedProgressToLocalData)', () => {
+  it('1. مزامنة الفاتحة [1]: useMemorizationStore و localStorage يعكسان 7 من 7 آيات ومكتملة', () => {
+    localStorage.clear();
+    const record = { ...createCleanRecord(), priorMemorizedSurahs: [1] };
+    syncUnifiedProgressToLocalData(record);
+
+    // التحقق من حالة Zustand في الذاكرة
+    const storeState = useMemorizationStore.getState();
+    const fatiha = storeState.progress.find((p) => p.surahId === 1);
+    expect(fatiha).toBeDefined();
+    expect(fatiha?.versesMemorized).toBe(7);
+    expect(fatiha?.status).toBe('memorized');
+    expect(fatiha?.strength).toBe(100);
+
+    // التحقق من localStorage
+    const raw = localStorage.getItem('hafiz-quran-v1');
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.state?.progress).toBeDefined();
+    expect(parsed.state.progress.length).toBe(114);
+    const fatihaLocal = parsed.state.progress.find((p: any) => p.surahId === 1);
+    expect(fatihaLocal.versesMemorized).toBe(7);
+    expect(fatihaLocal.status).toBe('memorized');
+  });
+
+  it('2. مزامنة باردة (Cold Start): عندما يكون localStorage فارغاً تماماً يتم إنشاء 114 سورة كاملة دون undefined', () => {
+    localStorage.removeItem('hafiz-quran-v1');
+    const record = { ...createCleanRecord(), priorMemorizedSurahs: [4] };
+    syncUnifiedProgressToLocalData(record);
+
+    const raw = localStorage.getItem('hafiz-quran-v1');
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.state?.progress).toBeDefined();
+    expect(parsed.state.progress.length).toBe(114);
+
+    const surah4 = parsed.state.progress.find((p: any) => p.surahId === 4);
+    expect(surah4.versesMemorized).toBe(176);
+    expect(surah4.status).toBe('memorized');
+  });
+
+  it('3. مزامنة النساء [4]: في الذاكرة 176/176 ومكتملة، والصفحة 106 ليست effective', () => {
+    const record = { ...createCleanRecord(), priorMemorizedSurahs: [4] };
+    syncUnifiedProgressToLocalData(record);
+
+    const storeState = useMemorizationStore.getState();
+    const nisa = storeState.progress.find((p) => p.surahId === 4);
+    expect(nisa?.versesMemorized).toBe(176);
+    expect(nisa?.status).toBe('memorized');
+
+    // التأكد من أن الصفحة 106 ليست فعالة
+    const effective = selectEffectiveMemorizedPages(record);
+    expect(effective.includes(106)).toBe(false);
+    expect(effective.length).toBe(29);
+  });
+
+  it('4. مزامنة النساء والمائدة [4, 5]: كلتاهما مكتملتان في الذاكرة والصفحة 106 فعالة', () => {
+    const record = { ...createCleanRecord(), priorMemorizedSurahs: [4, 5] };
+    syncUnifiedProgressToLocalData(record);
+
+    const storeState = useMemorizationStore.getState();
+    const nisa = storeState.progress.find((p) => p.surahId === 4);
+    const maidah = storeState.progress.find((p) => p.surahId === 5);
+    expect(nisa?.status).toBe('memorized');
+    expect(maidah?.status).toBe('memorized');
+
+    const effective = selectEffectiveMemorizedPages(record);
+    expect(effective.includes(106)).toBe(true);
+    expect(effective.length).toBe(51);
   });
 });

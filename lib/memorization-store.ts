@@ -1184,3 +1184,11 @@ export const useMemorizationStore = create<MemorizationState>()(
     }
   )
 );
+
+if (typeof window !== "undefined") {
+  window.addEventListener("hafiz_unified_record_updated", () => {
+    try {
+      useMemorizationStore.persist?.rehydrate();
+    } catch (_) {}
+  });
+}

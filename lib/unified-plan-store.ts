@@ -21,6 +21,7 @@ export type { PageRatingState };
 import { createHafs, Page, Surah } from 'quran-meta';
 import { PlanDay, StudyDay, FridayDay } from './six-month-plan-types';
 import { JUZ_META_RANGES } from './plan-ui-helpers';
+import { useMemorizationStore } from './memorization-store';
 
 const hafs = createHafs();
 
@@ -916,16 +917,32 @@ export function syncUnifiedProgressToLocalData(record: UnifiedPlanRecord): void 
     const existing = raw ? JSON.parse(raw) : {};
     const derived = deriveQuranProgress(selectEffectiveMemorizedPages(record), record.priorMemorizedSurahs || []);
 
-    const prevProgress: Array<any> = existing.state?.progress || [];
-    const updatedProgress = prevProgress.map((p: any) => {
+    const baseProgress: Array<any> =
+      existing.state?.progress && Array.isArray(existing.state.progress) && existing.state.progress.length === 114
+        ? existing.state.progress
+        : Array.from({ length: 114 }, (_, i) => ({
+            surahId: i + 1,
+            versesMemorized: 0,
+            memorizedAt: null,
+            lastReview: null,
+            reviewHistory: [],
+            strength: 0,
+            status: 'not_started',
+          }));
+
+    const updatedProgress = baseProgress.map((p: any) => {
       const d = derived.surahs[p.surahId - 1];
       if (!d) return p;
+      const isCompleted = d.status === 'completed';
+      const effectiveVerses = Math.max(p.versesMemorized || 0, d.versesMemorized);
+      const isMemorized = isCompleted || p.status === 'memorized' || effectiveVerses >= d.totalVerses;
       return {
         ...p,
-        versesMemorized: d.versesMemorized,
-        status: d.status === 'completed' ? 'memorized' : d.status,
-        strength: d.status === 'completed' ? 100 : d.versesMemorized > 0 ? 75 : 0,
-        lastReviewed: p.lastReviewed || (d.versesMemorized > 0 ? formatLocalDateStr() : null),
+        versesMemorized: effectiveVerses,
+        status: isMemorized ? 'memorized' : effectiveVerses > 0 ? 'in_progress' : p.status || 'not_started',
+        strength: isMemorized ? 100 : p.strength || (effectiveVerses > 0 ? 75 : 0),
+        lastReviewed: p.lastReviewed || (effectiveVerses > 0 ? formatLocalDateStr() : null),
+        memorizedAt: isMemorized ? p.memorizedAt || new Date().toISOString() : p.memorizedAt,
       };
     });
 
@@ -943,12 +960,26 @@ export function syncUnifiedProgressToLocalData(record: UnifiedPlanRecord): void 
       ...existing,
       state: {
         ...(existing.state || {}),
-        progress: updatedProgress.length > 0 ? updatedProgress : existing.state?.progress,
+        progress: updatedProgress,
         stats: updatedStats,
       },
     };
 
     localStorage.setItem('hafiz-quran-v1', JSON.stringify(nextState));
+
+    // تحديث متجر Zustand في الذاكرة فورياً حتى تشعر به صفحة القرآن بدون إعادة تحميل
+    try {
+      if (typeof useMemorizationStore !== 'undefined' && useMemorizationStore.setState) {
+        useMemorizationStore.setState((prev) => ({
+          ...prev,
+          progress: updatedProgress,
+          stats: {
+            ...prev.stats,
+            ...updatedStats,
+          },
+        }));
+      }
+    } catch (_) {}
   } catch (e) {
     console.warn('[UnifiedPlanStore] Could not sync to local-data:', e);
   }
