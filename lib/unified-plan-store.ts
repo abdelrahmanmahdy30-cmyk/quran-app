@@ -623,16 +623,32 @@ export function updatePriorMemorizedSurahs(
 }
 
 /**
+ * اشتقاق الصفحات المحفوظة الفعالة: مجموع memorizedPages + صفحات السور المحفوظة مسبقاً كاملاً.
+ * دالة نقية (Pure): لا تلمس localStorage ولا تعدل السجل.
+ * تُزيل التكرار وتُرتّب تصاعدياً.
+ */
+export function selectEffectiveMemorizedPages(record: UnifiedPlanRecord): number[] {
+  const prior =
+    record.priorMemorizedSurahs && record.priorMemorizedSurahs.length > 0
+      ? computeFullyCoveredPages(record.priorMemorizedSurahs)
+      : [];
+  if (prior.length === 0) return record.memorizedPages;
+  const merged = new Set<number>([...record.memorizedPages, ...prior]);
+  return Array.from(merged).sort((a, b) => a - b);
+}
+
+/**
  * المحددات النقية (Pure Selectors)
  */
 
 export function selectPagesDone(record: UnifiedPlanRecord): number {
-  return record.memorizedPages.length;
+  return selectEffectiveMemorizedPages(record).length;
 }
 
 export function selectPercentTotal(record: UnifiedPlanRecord): number {
-  if (record.memorizedPages.length === 0) return 0;
-  return Math.round((record.memorizedPages.length / 604) * 100);
+  const count = selectEffectiveMemorizedPages(record).length;
+  if (count === 0) return 0;
+  return Math.round((count / 604) * 100);
 }
 
 export function selectCompletedDaysCount(record: UnifiedPlanRecord): number {
@@ -692,7 +708,7 @@ export function selectIsStepDone(
 }
 
 export function selectIsPageMemorized(record: UnifiedPlanRecord, page: number): boolean {
-  return record.memorizedPages.includes(page);
+  return selectEffectiveMemorizedPages(record).includes(page);
 }
 
 export function selectJuzStatus(
@@ -703,9 +719,10 @@ export function selectJuzStatus(
   if (!meta) return 'not_started';
 
   const totalInJuz = meta.endPage - meta.startPage + 1;
+  const effectiveSet = new Set<number>(selectEffectiveMemorizedPages(record));
   let count = 0;
   for (let p = meta.startPage; p <= meta.endPage; p++) {
-    if (record.memorizedPages.includes(p)) count++;
+    if (effectiveSet.has(p)) count++;
   }
 
   if (count === totalInJuz) return 'completed';
@@ -797,7 +814,10 @@ export interface DerivedQuranProgress {
 /**
  * اشتقاق تقدم السور والآيات والأجزاء بدقة كاملة من الصفحات المحفوظة عبر quran-meta
  */
-export function deriveQuranProgress(memorizedPages: number[]): DerivedQuranProgress {
+export function deriveQuranProgress(
+  memorizedPages: number[],
+  priorMemorizedSurahs: number[] = []
+): DerivedQuranProgress {
   const pageSet = new Set(memorizedPages);
   const surahVerses = new Map<number, Set<number>>();
 
@@ -807,6 +827,17 @@ export function deriveQuranProgress(memorizedPages: number[]): DerivedQuranProgr
         if (!surahVerses.has(s)) surahVerses.set(s, new Set());
         surahVerses.get(s)!.add(a);
       }
+    }
+  }
+
+  // أضف جميع آيات السور المحفوظة مسبقاً كاملةً (بغض النظر عن الصفحات المشتركة)
+  for (const sId of priorMemorizedSurahs) {
+    if (sId < 1 || sId > 114) continue;
+    const totalVersesInSurah = hafs.getAyahCountInSurah(sId as Surah);
+    if (!surahVerses.has(sId)) surahVerses.set(sId, new Set());
+    const ayahSet = surahVerses.get(sId)!;
+    for (let a = 1; a <= totalVersesInSurah; a++) {
+      ayahSet.add(a);
     }
   }
 
@@ -883,7 +914,7 @@ export function syncUnifiedProgressToLocalData(record: UnifiedPlanRecord): void 
   try {
     const raw = localStorage.getItem('hafiz-quran-v1');
     const existing = raw ? JSON.parse(raw) : {};
-    const derived = deriveQuranProgress(record.memorizedPages);
+    const derived = deriveQuranProgress(selectEffectiveMemorizedPages(record), record.priorMemorizedSurahs || []);
 
     const prevProgress: Array<any> = existing.state?.progress || [];
     const updatedProgress = prevProgress.map((p: any) => {

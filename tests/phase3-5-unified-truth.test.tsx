@@ -4,7 +4,7 @@
  * ترندر المكونات الحقيقية على السجل الموحد (vitest + @testing-library/react)
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import React from "react";
 import { render, screen, act } from "@testing-library/react";
 import { KhatmaJourneyCard } from "@/components/dashboard/khatma-journey-card";
@@ -129,23 +129,31 @@ describe("المرحلة 3.5: اختبارات التكامل ومصدر واح�
   });
 
   it("4. منع تعليم أي يوم مستقبلي من المسارات الأربعة مع قفل صريح وتلميح", () => {
-    const today = "2026-11-01";
-    const futureDate = "2026-11-15";
+    // نجمّد الوقت على 2026-11-01 حتى يتعامل المكوّن مع 2026-11-15 كيوم مستقبلي
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-01T10:00:00"));
 
-    expect(canMarkDate(futureDate, today)).toBe(false);
-    expect(canMarkDate(today, today)).toBe(true);
+    try {
+      const today = "2026-11-01";
+      const futureDate = "2026-11-15";
 
-    let record = loadUnifiedRecord();
-    const beforeStr = JSON.stringify(record);
-    record = markStep(record, futureDate, "new", allDays, today);
-    expect(JSON.stringify(record)).toBe(beforeStr);
+      expect(canMarkDate(futureDate, today)).toBe(false);
+      expect(canMarkDate(today, today)).toBe(true);
 
-    record = markPage(record, 100, allDays, today);
-    expect(record.memorizedPages).not.includes(100);
+      let record = loadUnifiedRecord();
+      const beforeStr = JSON.stringify(record);
+      record = markStep(record, futureDate, "new", allDays, today);
+      expect(JSON.stringify(record)).toBe(beforeStr);
 
-    render(<TodayWardCard forcedDateStr={futureDate} />);
-    const saveBtn = screen.getByRole("button", { name: /تم الحفظ/i });
-    expect(saveBtn.hasAttribute("disabled")).toBe(true);
+      record = markPage(record, 100, allDays, today);
+      expect(record.memorizedPages).not.includes(100);
+
+      render(<TodayWardCard forcedDateStr={futureDate} />);
+      const saveBtn = screen.getByRole("button", { name: /تم الحفظ/i });
+      expect(saveBtn.hasAttribute("disabled")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("5. تاريخ الختمة = 2027-04-29 في كل البطاقات عند البدء من ص 1 ولا يظهر 2027-04-30 إطلاقاً", () => {

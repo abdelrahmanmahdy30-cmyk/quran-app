@@ -37,6 +37,7 @@ import {
   selectJuzStatus,
   selectAheadOrBehindPages,
   selectStreak,
+  selectEffectiveMemorizedPages,
   deriveQuranProgress,
   getRequiredStepsForDay,
   LOCKED_KHATMA_DATE,
@@ -172,7 +173,10 @@ export function usePlanProgress(explicitPlanId?: string) {
   const aheadOrBehindPages = useMemo(() => selectAheadOrBehindPages(record, allDays, todayLocalDate), [record, allDays, todayLocalDate]);
   const isAhead = aheadOrBehindPages > 0;
   const streak = useMemo(() => selectStreak(record, allDays, todayLocalDate), [record, allDays, todayLocalDate]);
-  const derivedQuran = useMemo(() => deriveQuranProgress(record.memorizedPages), [record.memorizedPages]);
+  const derivedQuran = useMemo(
+    () => deriveQuranProgress(selectEffectiveMemorizedPages(record), record.priorMemorizedSurahs || []),
+    [record]
+  );
 
   const selectors = useMemo(() => ({
     pagesDone,
