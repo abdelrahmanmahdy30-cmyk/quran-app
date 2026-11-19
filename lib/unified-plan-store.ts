@@ -113,8 +113,30 @@ export function formatLocalDateStr(date: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
-export function canMarkDate(targetDateStr: string, todayDateStr: string = formatLocalDateStr()): boolean {
-  return targetDateStr <= todayDateStr;
+export function canMarkDate(
+  targetDateStr: string,
+  todayDateStr: string = formatLocalDateStr(),
+  record?: UnifiedPlanRecord,
+  planDays?: PlanDay[]
+): boolean {
+  if (targetDateStr <= todayDateStr) {
+    return true;
+  }
+  if (!record || !planDays || planDays.length === 0) {
+    return false;
+  }
+  const targetIndex = planDays.findIndex((d) => d.date === targetDateStr);
+  if (targetIndex <= 0) {
+    return false;
+  }
+  const prevDay = planDays[targetIndex - 1];
+  if (!record.frozenDays?.[prevDay.date]) {
+    return false;
+  }
+  if (prevDay.date > todayDateStr) {
+    return canMarkDate(prevDay.date, todayDateStr, record, planDays);
+  }
+  return true;
 }
 
 export function createCleanRecord(planId: string = DEFAULT_PLAN_ID): UnifiedPlanRecord {
@@ -144,7 +166,7 @@ export function validateAndSanitizeRecord(data: any, todayStr: string = formatLo
   const validSteps: Record<string, DayStepsState> = {};
   if (data.steps && typeof data.steps === 'object') {
     for (const [date, steps] of Object.entries(data.steps)) {
-      if (typeof date === 'string' && canMarkDate(date, todayStr) && steps && typeof steps === 'object') {
+      if (typeof date === 'string' && steps && typeof steps === 'object') {
         const s = steps as any;
         validSteps[date] = {
           far: Boolean(s.far),
@@ -158,7 +180,7 @@ export function validateAndSanitizeRecord(data: any, todayStr: string = formatLo
   const validFrozen: Record<string, DaySnapshot> = {};
   if (data.frozenDays && typeof data.frozenDays === 'object') {
     for (const [date, snap] of Object.entries(data.frozenDays)) {
-      if (typeof date === 'string' && canMarkDate(date, todayStr) && snap && typeof snap === 'object') {
+      if (typeof date === 'string' && snap && typeof snap === 'object') {
         const sn = snap as any;
         validFrozen[date] = {
           date,
@@ -192,13 +214,13 @@ export function validateAndSanitizeRecord(data: any, todayStr: string = formatLo
     priorPagesMemorized: Boolean(data.priorPagesMemorized),
     priorMemorizedSurahs: Array.isArray(data.priorMemorizedSurahs)
       ? Array.from(new Set<number>(
-          data.priorMemorizedSurahs.filter((n: any): n is number =>
-            typeof n === 'number' &&
-            Number.isInteger(n) &&
-            n >= 1 &&
-            n <= 114
-          )
-        )).sort((a: number, b: number) => a - b)
+        data.priorMemorizedSurahs.filter((n: any): n is number =>
+          typeof n === 'number' &&
+          Number.isInteger(n) &&
+          n >= 1 &&
+          n <= 114
+        )
+      )).sort((a: number, b: number) => a - b)
       : [],
     memorizedPages: validPages,
     steps: validSteps,
@@ -377,10 +399,10 @@ export function markStep(
   record: UnifiedPlanRecord,
   localDate: string,
   step: 'far' | 'near' | 'new',
-  planDays: PlanDay[] = getAllPlanDays(),
+  planDays: PlanDay[] = getAllPlanDays(record),
   todayStr: string = formatLocalDateStr()
 ): UnifiedPlanRecord {
-  if (!canMarkDate(localDate, todayStr)) {
+  if (!canMarkDate(localDate, todayStr, record, planDays)) {
     console.warn(`[UnifiedPlanStore] Cannot mark future date: ${localDate}`);
     return record;
   }
@@ -434,11 +456,12 @@ export function storeRatePage(
   page: number,
   rating: ReviewRating,
   reviewDate: string = formatLocalDateStr(),
-  todayStr: string = formatLocalDateStr()
+  todayStr: string = formatLocalDateStr(),
+  planDays: PlanDay[] = getAllPlanDays(record)
 ): UnifiedPlanRecord {
   if (page < 1 || page > 604) return record;
 
-  if (!canMarkDate(reviewDate, todayStr)) {
+  if (!canMarkDate(reviewDate, todayStr, record, planDays)) {
     console.warn(`[UnifiedPlanStore] Cannot rate page with future review date ${reviewDate}`);
     return record;
   }
@@ -468,11 +491,12 @@ export function storeRatePages(
   pages: number[],
   rating: ReviewRating,
   reviewDate: string = formatLocalDateStr(),
-  todayStr: string = formatLocalDateStr()
+  todayStr: string = formatLocalDateStr(),
+  planDays: PlanDay[] = getAllPlanDays(record)
 ): UnifiedPlanRecord {
   let curr = record;
   for (const p of pages) {
-    curr = storeRatePage(curr, p, rating, reviewDate, todayStr);
+    curr = storeRatePage(curr, p, rating, reviewDate, todayStr, planDays);
   }
   return curr;
 }
@@ -481,10 +505,10 @@ export function unmarkStep(
   record: UnifiedPlanRecord,
   localDate: string,
   step: 'far' | 'near' | 'new',
-  planDays: PlanDay[] = getAllPlanDays(),
+  planDays: PlanDay[] = getAllPlanDays(record),
   todayStr: string = formatLocalDateStr()
 ): UnifiedPlanRecord {
-  if (!canMarkDate(localDate, todayStr)) {
+  if (!canMarkDate(localDate, todayStr, record, planDays)) {
     return record;
   }
 
@@ -518,13 +542,13 @@ export function unmarkStep(
 export function markPage(
   record: UnifiedPlanRecord,
   page: number,
-  planDays: PlanDay[] = getAllPlanDays(),
+  planDays: PlanDay[] = getAllPlanDays(record),
   todayStr: string = formatLocalDateStr()
 ): UnifiedPlanRecord {
   if (page < 1 || page > 604) return record;
 
   const targetDay = planDays.find((d) => d.type !== 'friday' && (d as StudyDay).newPages?.some((p) => p.p === page));
-  if (targetDay && !canMarkDate(targetDay.date, todayStr)) {
+  if (targetDay && !canMarkDate(targetDay.date, todayStr, record, planDays)) {
     console.warn(`[UnifiedPlanStore] Cannot mark page ${page} belonging to future date ${targetDay.date}`);
     return record;
   }
@@ -553,13 +577,13 @@ export function markPage(
 export function unmarkPage(
   record: UnifiedPlanRecord,
   page: number,
-  planDays: PlanDay[] = getAllPlanDays(),
+  planDays: PlanDay[] = getAllPlanDays(record),
   todayStr: string = formatLocalDateStr()
 ): UnifiedPlanRecord {
   if (page < 1 || page > 604) return record;
 
   const targetDay = planDays.find((d) => d.type !== 'friday' && (d as StudyDay).newPages?.some((p) => p.p === page));
-  if (targetDay && !canMarkDate(targetDay.date, todayStr)) {
+  if (targetDay && !canMarkDate(targetDay.date, todayStr, record, planDays)) {
     return record;
   }
 
@@ -921,14 +945,14 @@ export function syncUnifiedProgressToLocalData(record: UnifiedPlanRecord): void 
       existing.state?.progress && Array.isArray(existing.state.progress) && existing.state.progress.length === 114
         ? existing.state.progress
         : Array.from({ length: 114 }, (_, i) => ({
-            surahId: i + 1,
-            versesMemorized: 0,
-            memorizedAt: null,
-            lastReview: null,
-            reviewHistory: [],
-            strength: 0,
-            status: 'not_started',
-          }));
+          surahId: i + 1,
+          versesMemorized: 0,
+          memorizedAt: null,
+          lastReview: null,
+          reviewHistory: [],
+          strength: 0,
+          status: 'not_started',
+        }));
 
     const updatedProgress = baseProgress.map((p: any) => {
       const d = derived.surahs[p.surahId - 1];
@@ -979,7 +1003,7 @@ export function syncUnifiedProgressToLocalData(record: UnifiedPlanRecord): void 
           },
         }));
       }
-    } catch (_) {}
+    } catch (_) { }
   } catch (e) {
     console.warn('[UnifiedPlanStore] Could not sync to local-data:', e);
   }

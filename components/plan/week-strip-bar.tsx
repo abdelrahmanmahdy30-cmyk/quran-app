@@ -24,7 +24,7 @@ interface WeekStripBarProps {
 }
 
 export function WeekStripBar({ selectedDateStr, onSelectDate, className }: WeekStripBarProps) {
-  const { allDays, todayLocalDate, isDayCompleted } = usePlanProgress();
+  const { allDays, todayLocalDate, isDayCompleted, canMarkDay } = usePlanProgress();
 
   const weekDays = useMemo(() => {
     return getWeekDays(allDays, selectedDateStr || todayLocalDate);
@@ -51,7 +51,7 @@ export function WeekStripBar({ selectedDateStr, onSelectDate, className }: WeekS
             const isCompleted = isDayCompleted(day.date);
             const isToday = day.date === todayLocalDate;
             const isSelected = day.date === activeDate;
-            const isFuture = !canMarkDayAsCompleted(day.date, todayLocalDate);
+            const isFuture = !canMarkDay(day.date);
             const isFriday = day.type === "friday";
 
             // تحديد الحالة بدقة وفقاً للمطلوب

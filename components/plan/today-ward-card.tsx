@@ -45,6 +45,7 @@ export function TodayWardCard({ forcedDateStr, onDateChange, className }: TodayW
     toggleDay,
     isSubTaskDone,
     toggleSubTask,
+    canMarkDay,
   } = usePlanProgress();
 
   // اليوم المحدد للعرض (الافتراضي هو اليوم الفعلي، أو أول يوم بالخطة)
@@ -83,7 +84,7 @@ export function TodayWardCard({ forcedDateStr, onDateChange, className }: TodayW
 
   const isToday = currentDay.date === todayLocalDate;
   const isCompleted = isDayCompleted(currentDay.date);
-  const isFuture = !canMarkDayAsCompleted(currentDay.date, todayLocalDate);
+  const isFuture = !canMarkDay(currentDay.date);
 
   // حالة نافذة تقييم التسميع
   const [evalDialogOpen, setEvalDialogOpen] = useState(false);

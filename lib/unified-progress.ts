@@ -78,13 +78,33 @@ export function useUnifiedProgress(): UnifiedProgress {
 
 /**
  * التحقق من إمكانية تعليم اليوم:
- * يُمنع تعليم أي يوم مستقبلي (dateStr > todayLocalDate) بناء على التاريخ المحلي YYYY-MM-DD
+ * يُسمح بالتعليم إذا كان التاريخ <= اليوم الحالي،
+ * أو إذا كان اليوم السابق في ترتيب الخطة مكتملاً في السجل الموحد
  */
 export function canMarkDayAsCompleted(
   dateStr: string,
-  todayLocalDate: string = formatLocalDate()
+  todayLocalDate: string = formatLocalDate(),
+  record?: { frozenDays?: Record<string, any> },
+  planDays?: Array<{ date: string }>
 ): boolean {
-  return dateStr <= todayLocalDate;
+  if (dateStr <= todayLocalDate) {
+    return true;
+  }
+  if (!record || !planDays || planDays.length === 0) {
+    return false;
+  }
+  const targetIndex = planDays.findIndex((d) => d.date === dateStr);
+  if (targetIndex <= 0) {
+    return false;
+  }
+  const prevDay = planDays[targetIndex - 1];
+  if (!record.frozenDays?.[prevDay.date]) {
+    return false;
+  }
+  if (prevDay.date > todayLocalDate) {
+    return canMarkDayAsCompleted(prevDay.date, todayLocalDate, record, planDays);
+  }
+  return true;
 }
 
 export { PLAN_STORAGE_KEYS, getPlanStorageKey, formatLocalDate };

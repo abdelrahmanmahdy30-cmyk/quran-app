@@ -220,7 +220,7 @@ export function usePlanProgress(explicitPlanId?: string) {
     isSubTaskDone: (dateStr: string, step: SupportedStep) => selectIsStepDone(record, dateStr, normalizeStep(step)),
     isPageMemorized: (p: number) => selectIsPageMemorized(record, p),
     getJuzStatus: (juz: number) => selectJuzStatus(record, juz),
-    canMarkDay: (dateStr: string) => canMarkDate(dateStr, todayLocalDate),
+    canMarkDay: (dateStr: string) => canMarkDate(dateStr, todayLocalDate, record, allDays),
     // إجراءات
     markStep: markStepAction,
     unmarkStep: unmarkStepAction,
